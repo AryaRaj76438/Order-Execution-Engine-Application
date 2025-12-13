@@ -1,6 +1,6 @@
 package com.dex.orderengine.model;
 
 public enum DexType {
-    RAYDIYUM,
+    RAYDIUM,
     METEORA
 }
