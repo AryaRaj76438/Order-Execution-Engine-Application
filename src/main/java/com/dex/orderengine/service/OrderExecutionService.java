@@ -80,6 +80,93 @@ public class OrderExecutionService {
                 .build();
     }
 
+    @Scheduled(fixedDelay = 100)
+    public void processQueue() {
+        String orderId = queueService.pollNext();
+        if (orderId != null) {
+            executeOrderAsync(orderId);
+        }
+    }
+
+    @Async("orderExecutor")
+    public void executeOrderAsync(String orderId) {
+        try {
+            Optional<Order> optOrder = orderRepository.findById(orderId);
+            if (optOrder.isEmpty()) {
+                log.error("Order not found: {}", orderId);
+                queueService.markFailed(orderId);
+                return;
+            }
+
+            Order order = optOrder.get();
+            executeOrder(order);
+
+        } catch (Exception e) {
+            log.error("Error executing order {}: {}", orderId, e.getMessage(), e);
+            handleExecutionFailure(orderId, e.getMessage());
+        }
+    }
+
+    private void executeOrder(Order order) {
+        try {
+            order.setStatus(OrderStatus.ROUTING);
+            orderRepository.save(order);
+            notificationService.notifyOrderStatus(order.getId(), OrderStatus.ROUTING,
+                    "Fetching quotes from Raydium and Meteora");
+
+            CompletableFuture<DexQuote> raydiumFuture = dexRoutingService.getRaydiumQuote(
+                    order.getTokenIn(), order.getTokenOut(), order.getAmount());
+            CompletableFuture<DexQuote> meteoraFuture = dexRoutingService.getMeteorQuote(
+                    order.getTokenIn(), order.getTokenOut(), order.getAmount());
+
+            DexQuote raydiumQuote = raydiumFuture.get();
+            DexQuote meteoraQuote = meteoraFuture.get();
+
+            order.setRaydiumQuote(raydiumQuote.getPrice());
+            order.setMeteorQuote(meteoraQuote.getPrice());
+
+            DexQuote bestQuote = dexRoutingService.selectBestQuote(raydiumQuote, meteoraQuote);
+            order.setSelectedDex(bestQuote.getDexType());
+            orderRepository.save(order);
+
+            notificationService.notifyRouting(order.getId(),
+                    raydiumQuote.getPrice(), meteoraQuote.getPrice(), bestQuote.getDexType());
+
+            order.setStatus(OrderStatus.BUILDING);
+            orderRepository.save(order);
+            notificationService.notifyOrderStatus(order.getId(), OrderStatus.BUILDING,
+                    "Building transaction for " + bestQuote.getDexType().name());
+
+            Thread.sleep(500);
+
+            order.setStatus(OrderStatus.SUBMITTED);
+            orderRepository.save(order);
+            notificationService.notifyOrderStatus(order.getId(), OrderStatus.SUBMITTED,
+                    "Transaction submitted to " + bestQuote.getDexType().name());
+
+            ExecutionResult result = dexRoutingService.executeSwap(
+                    bestQuote.getDexType(), order, bestQuote);
+
+            if (result.isSuccess()) {
+                order.setStatus(OrderStatus.CONFIRMED);
+                order.setExecutedPrice(result.getExecutedPrice());
+                order.setTxHash(result.getTxHash());
+                order.setCompletedAt(LocalDateTime.now());
+                orderRepository.save(order);
+
+                notificationService.notifyConfirmed(order);
+                queueService.markCompleted(order.getId());
+
+                log.info("Order {} executed successfully. TxHash: {}", order.getId(), result.getTxHash());
+            } else {
+                handleRetry(order, result.getErrorMessage());
+            }
+
+        } catch (Exception e) {
+            log.error("Error during order execution: {}", e.getMessage(), e);
+            handleRetry(order, e.getMessage());
+        }
+    }
 
     private void handleRetry(Order order, String errorMessage) {
         order.setRetryCount(order.getRetryCount() + 1);
