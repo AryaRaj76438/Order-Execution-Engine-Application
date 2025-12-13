@@ -1,5 +1,6 @@
 package com.dex.orderengine.dto;
 
+
 import com.dex.orderengine.model.DexType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -9,13 +10,15 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 
 @Data
-@AllArgsConstructor
 @NoArgsConstructor
+@AllArgsConstructor
 @Builder
-public class DexQuote {
-    private DexType dexType;
-    private BigDecimal price;
-    private BigDecimal fee;
-    private BigDecimal outputAmount;
-    private long responseTimeMs;
+public class ExecutionResult {
+    private boolean success;
+    private String txHash;
+    private BigDecimal executedPrice;
+    private DexType dex;
+    private String errorMessage;
 }
+
+
