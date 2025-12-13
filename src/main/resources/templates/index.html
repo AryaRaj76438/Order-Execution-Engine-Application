@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DEX Order Execution Engine</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-yellow: #d29922;
+            --accent-red: #f85149;
+            --accent-purple: #a371f7;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 12px;
+        }
+
+        .card-header {
+            background-color: var(--bg-tertiary);
+            border-bottom: 1px solid var(--bg-tertiary);
+            font-weight: 600;
+        }
+
+        .form-control, .form-select {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .form-control:focus, .form-select:focus {
+            background-color: var(--bg-tertiary);
+            border-color: var(--accent-blue);
+            color: var(--text-primary);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.2);
+        }
+
+        .btn-primary {
+            background-color: var(--accent-blue);
+            border-color: var(--accent-blue);
+        }
+
+        .btn-primary:hover {
+            background-color: #4393e7;
+            border-color: #4393e7;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .status-pending { background-color: rgba(139, 148, 158, 0.2); color: var(--text-secondary); }
+        .status-routing { background-color: rgba(88, 166, 255, 0.2); color: var(--accent-blue); }
+        .status-building { background-color: rgba(163, 113, 247, 0.2); color: var(--accent-purple); }
+        .status-submitted { background-color: rgba(210, 153, 34, 0.2); color: var(--accent-yellow); }
+        .status-confirmed { background-color: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+        .status-failed { background-color: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+
+        .order-card {
+            background-color: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .order-card.highlight {
+            border-left: 4px solid var(--accent-blue);
+            animation: pulse 0.5s ease;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); }
+        }
+
+        .tx-hash {
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            color: var(--accent-blue);
+            word-break: break-all;
+        }
+
+        .quote-comparison {
+            display: flex;
+            gap: 16px;
+            margin: 12px 0;
+        }
+
+        .quote-box {
+            flex: 1;
+            padding: 12px;
+            border-radius: 8px;
+            background-color: var(--bg-secondary);
+        }
+
+        .quote-box.selected {
+            border: 2px solid var(--accent-green);
+        }
+
+        .ws-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .ws-connected { background-color: var(--accent-green); }
+        .ws-disconnected { background-color: var(--accent-red); }
+
+        .stats-card {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .stats-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--accent-blue);
+        }
+
+        .stats-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .log-container {
+            background-color: var(--bg-primary);
+            border-radius: 8px;
+            padding: 16px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+        }
+
+        .log-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        .log-time {
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-dark bg-dark border-bottom border-secondary">
+    <div class="container">
+            <span class="navbar-brand mb-0 h1">
+                <i class="bi bi-currency-exchange me-2"></i>
+                DEX Order Execution Engine
+            </span>
+        <span class="text-secondary">
+                <span class="ws-indicator" id="wsIndicator"></span>
+                <span id="wsStatus">Connecting...</span>
+            </span>
+    </div>
+</nav>
+
+<div class="container py-4">
+    <div class="row g-4">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-plus-circle me-2"></i>Submit Market Order
+                </div>
+                <div class="card-body">
+                    <form id="orderForm">
+                        <div class="mb-3">
+                            <label class="form-label">Token In</label>
+                            <select class="form-select" id="tokenIn" required>
+                                <option value="SOL">SOL (Solana)</option>
+                                <option value="USDC">USDC</option>
+                                <option value="USDT">USDT</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Token Out</label>
+                            <select class="form-select" id="tokenOut" required>
+                                <option value="USDC">USDC</option>
+                                <option value="SOL">SOL (Solana)</option>
+                                <option value="USDT">USDT</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Amount</label>
+                            <input type="number" class="form-control" id="amount"
+                                   placeholder="Enter amount" step="0.000001" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Slippage (%)</label>
+                            <input type="number" class="form-control" id="slippage"
+                                   value="1" min="0.1" max="50" step="0.1">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="bi bi-send me-2"></i>Execute Order
+                        </button>
+                    </form>
+
+                    <div class="mt-3">
+                        <button class="btn btn-outline-secondary w-100" onclick="submitBatchOrders()">
+                            <i class="bi bi-collection me-2"></i>Submit 5 Test Orders
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mt-4">
+                <div class="card-header">
+                    <i class="bi bi-bar-chart me-2"></i>Queue Statistics
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-6 stats-card">
+                            <div class="stats-value" id="queueSize">0</div>
+                            <div class="stats-label">Queue Size</div>
+                        </div>
+                        <div class="col-6 stats-card">
+                            <div class="stats-value" id="processingCount">0</div>
+                            <div class="stats-label">Processing</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-list-check me-2"></i>Live Order Updates</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="clearOrders()">
+                        Clear
+                    </button>
+                </div>
+                <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+                    <div id="ordersContainer">
+                        <div class="text-center text-secondary py-4">
+                            <i class="bi bi-inbox fs-1"></i>
+                            <p class="mt-2">No orders yet. Submit an order to get started.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mt-4">
+                <div class="card-header">
+                    <i class="bi bi-terminal me-2"></i>Activity Log
+                </div>
+                <div class="card-body">
+                    <div class="log-container" id="logContainer">
+                        <div class="log-entry">
+                            <span class="log-time">[--:--:--]</span> Waiting for WebSocket connection...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+<script>
+    let stompClient = null;
+    const orders = new Map();
+
+    function connect() {
+        const socket = new SockJS('/ws');
+        stompClient = Stomp.over(socket);
+        stompClient.debug = null;
+
+        stompClient.connect({}, function(frame) {
+            updateConnectionStatus(true);
+            addLog('WebSocket connected successfully');
+
+            stompClient.subscribe('/topic/orders', function(message) {
+                const data = JSON.parse(message.body);
+                handleOrderUpdate(data);
+            });
+
+            refreshQueueStats();
+        }, function(error) {
+            updateConnectionStatus(false);
+            addLog('WebSocket error: ' + error);
+            setTimeout(connect, 5000);
+        });
+    }
+
+    function updateConnectionStatus(connected) {
+        const indicator = document.getElementById('wsIndicator');
+        const status = document.getElementById('wsStatus');
+        if (connected) {
+            indicator.className = 'ws-indicator ws-connected';
+            status.textContent = 'Connected';
+        } else {
+            indicator.className = 'ws-indicator ws-disconnected';
+            status.textContent = 'Disconnected';
+        }
+    }
+
+    function handleOrderUpdate(data) {
+        addLog(`Order ${data.orderId.substring(0, 8)}... → ${data.status}: ${data.message || ''}`);
+
+        orders.set(data.orderId, data);
+        renderOrders();
+        refreshQueueStats();
+    }
+
+    function renderOrders() {
+        const container = document.getElementById('ordersContainer');
+        if (orders.size === 0) {
+            container.innerHTML = `
+                <div class="text-center text-secondary py-4">
+                    <i class="bi bi-inbox fs-1"></i>
+                    <p class="mt-2">No orders yet. Submit an order to get started.</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '';
+        const sortedOrders = Array.from(orders.values()).reverse();
+
+        for (const order of sortedOrders) {
+            const statusClass = `status-${order.status.toLowerCase()}`;
+            html += `
+                <div class="order-card" id="order-${order.orderId}">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <span class="status-badge ${statusClass}">${order.status}</span>
+                        <small class="text-secondary">${formatTime(order.timestamp)}</small>
+                    </div>
+                    <div class="mb-2">
+                        <strong>Order ID:</strong>
+                        <code class="text-info">${order.orderId.substring(0, 12)}...</code>
+                    </div>
+                    ${order.message ? `<div class="text-secondary mb-2">${order.message}</div>` : ''}
+                    ${renderQuotes(order)}
+                    ${order.txHash ? `
+                        <div class="mt-2">
+                            <strong>Transaction:</strong>
+                            <div class="tx-hash">${order.txHash}</div>
+                        </div>
+                    ` : ''}
+                    ${order.executedPrice ? `
+                        <div class="mt-2">
+                            <strong>Executed Price:</strong>
+                            <span class="text-success">$${parseFloat(order.executedPrice).toFixed(6)}</span>
+                        </div>
+                    ` : ''}
+                    ${order.error ? `
+                        <div class="mt-2 text-danger">
+                            <i class="bi bi-exclamation-triangle me-1"></i>${order.error}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
+    }
+
+    function renderQuotes(order) {
+        if (!order.raydiumQuote && !order.meteoraQuote) return '';
+
+        const raydiumSelected = order.selectedDex === 'RAYDIUM';
+        const meteoraSelected = order.selectedDex === 'METEORA';
+
+        return `
+            <div class="quote-comparison">
+                <div class="quote-box ${raydiumSelected ? 'selected' : ''}">
+                    <div class="d-flex justify-content-between">
+                        <strong>Raydium</strong>
+                        ${raydiumSelected ? '<i class="bi bi-check-circle text-success"></i>' : ''}
+                    </div>
+                    <div class="text-info">$${order.raydiumQuote ? parseFloat(order.raydiumQuote).toFixed(4) : '--'}</div>
+                </div>
+                <div class="quote-box ${meteoraSelected ? 'selected' : ''}">
+                    <div class="d-flex justify-content-between">
+                        <strong>Meteora</strong>
+                        ${meteoraSelected ? '<i class="bi bi-check-circle text-success"></i>' : ''}
+                    </div>
+                    <div class="text-info">$${order.meteorQuote ? parseFloat(order.meteorQuote).toFixed(4) : '--'}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    function formatTime(timestamp) {
+        if (!timestamp) return '--:--:--';
+        const date = new Date(timestamp);
+        return date.toLocaleTimeString();
+    }
+
+    function addLog(message) {
+        const container = document.getElementById('logContainer');
+        const time = new Date().toLocaleTimeString();
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
+        container.insertBefore(entry, container.firstChild);
+
+        while (container.children.length > 50) {
+            container.removeChild(container.lastChild);
+        }
+    }
+
+    async function submitOrder(tokenIn, tokenOut, amount, slippage) {
+        try {
+            const response = await fetch('/api/orders/execute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tokenIn: tokenIn,
+                    tokenOut: tokenOut,
+                    amount: parseFloat(amount),
+                    slippage: parseFloat(slippage) / 100
+                })
+            });
+
+            const data = await response.json();
+            if (response.ok) {
+                addLog(`Order submitted: ${data.orderId.substring(0, 8)}...`);
+                orders.set(data.orderId, {
+                    orderId: data.orderId,
+                    status: data.status,
+                    message: data.message,
+                    timestamp: new Date().toISOString()
+                });
+                renderOrders();
+            } else {
+                addLog(`Error: ${data.message || 'Failed to submit order'}`);
+            }
+        } catch (error) {
+            addLog(`Error: ${error.message}`);
+        }
+    }
+
+    document.getElementById('orderForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const tokenIn = document.getElementById('tokenIn').value;
+        const tokenOut = document.getElementById('tokenOut').value;
+        const amount = document.getElementById('amount').value;
+        const slippage = document.getElementById('slippage').value;
+
+        await submitOrder(tokenIn, tokenOut, amount, slippage);
+    });
+
+    async function submitBatchOrders() {
+        addLog('Submitting 5 test orders...');
+        const tokens = ['SOL', 'USDC', 'USDT'];
+
+        for (let i = 0; i < 5; i++) {
+            const tokenIn = tokens[Math.floor(Math.random() * tokens.length)];
+            let tokenOut = tokens[Math.floor(Math.random() * tokens.length)];
+            while (tokenOut === tokenIn) {
+                tokenOut = tokens[Math.floor(Math.random() * tokens.length)];
+            }
+            const amount = (Math.random() * 10 + 0.1).toFixed(4);
+            await submitOrder(tokenIn, tokenOut, amount, 1);
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+    }
+
+    function clearOrders() {
+        orders.clear();
+        renderOrders();
+        addLog('Orders cleared');
+    }
+
+    async function refreshQueueStats() {
+        try {
+            const response = await fetch('/api/orders/queue/stats');
+            const stats = await response.json();
+            document.getElementById('queueSize').textContent = stats.queueSize || 0;
+            document.getElementById('processingCount').textContent = stats.processingCount || 0;
+        } catch (error) {
+            console.error('Failed to fetch queue stats:', error);
+        }
+    }
+
+    setInterval(refreshQueueStats, 2000);
+
+    connect();
+</script>
+</body>
+</html>
